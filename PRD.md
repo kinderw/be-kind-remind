@@ -463,6 +463,274 @@ dependencies {
 </application>
 ```
 
+## 21) Additional Constraints & Operational Policies
+
+* **API Quotas & Backoff**: Implement token-bucket throttling per app instance; exponential backoff (base 2, jitter 0–500ms) on HTTP 429/5xx; cap to 3 retries.
+* **Caching**: Cache last ETA per `(origin,destination)` with a 10‑minute TTL outside the 90‑minute window; inside the 90‑minute window rely on scheduled polls only.
+* **Doze & OEM Killers**: Provide in‑app education and deep link to battery optimization settings; no background location; rely on `setExactAndAllowWhileIdle` for reminders.
+* **Time Semantics**: Store all instants in UTC; keep `timeZoneId` with each task; explicitly handle DST gaps/overlaps (warn if `leaveBy` falls into a skipped or duplicated wall‑time).
+* **Accessibility**: Minimum 4.5:1 text contrast; TalkBack labels for buttons; focus order defined; large‑text tested up to 1.3x.
+* **Security**: No logging of precise lat/lng in release builds; redact PII in crash logs; keystore‑backed signing configs.
+
+## 22) Interfaces — Detailed Contracts
+
+### 22.1 Notifications & Intents
+
+* **Channel**: `departure_reminders` (IMPORTANCE_HIGH).
+* **Actions**:
+
+  * `ACTION_START_NAV`: extras `{taskId: Long}` → launches `Intent.ACTION_VIEW` with `google.navigation:q=<lat>,<lng>`.
+  * `ACTION_SNOOZE_5M`: extras `{taskId: Long}` → schedules one‑shot alarm `now+5m`.
+  * `ACTION_DISMISS`: extras `{taskId: Long}` → cancels all future alarms for the task instance.
+* **Deep links**: Tapping content opens `TaskDetailFragment` with `taskId`.
+
+### 22.2 Broadcast Receivers
+
+* `BootRestoreReceiver` listens to `BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`; calls `SchedulingEngine.restoreAll()`.
+
+### 22.3 Retrofit DTOs (minimal)
+
+```kotlin
+data class DistanceMatrixResponse(
+  val rows: List<Row>
+) { data class Row(val elements: List<Element>)
+  data class Element(
+    val status: String,
+    val duration: DMValue?,
+    val duration_in_traffic: DMValue?
+  )
+  data class DMValue(val value: Long) // seconds
+}
+```
+
+## 23) CI / Test Plan (Expanded)
+
+* **CI Jobs** (GitHub Actions example):
+
+  * `assembleDebug` & `lintVitalRelease` on PR.
+  * Run unit tests: `./gradlew test`.
+  * Run instrumented tests on Firebase Test Lab (Pixel 6 / Android 14, Pixel 4a / Android 12). Artifacts: screenshots, logcat, coverage.
+* **Static Analysis**: Ktlint + Detekt; dependency check (OWASP) on release.
+* **Fixtures**: JSON samples for `duration_in_traffic`, `ZERO_RESULTS`, `OVER_QUERY_LIMIT`.
+* **Deterministic Time Tests**: Inject `Clock` to simulate DST change (spring forward / fall back) and midnight crossing.
+
+## 24) Definition of Done (Expanded)
+
+* Code + tests merged with green CI, ≥80% line coverage for `SchedulingEngine` and `NotificationHelper`.
+* User‑facing copy reviewed; accessibility checks pass (TalkBack + large text).
+* `README.md` updated with setup (GCP APIs, SHA‑1, key restriction steps, billing enablement).
+* Database migration notes included when schema changes.
+* Privacy statement added to `README.md`.
+* Release notes created for v0.1.
+
+## 25) Secrets, Billing & Key Management
+
+* `MAPS_API_KEY` only from `local.properties`/CI secrets; **never** in source.
+* GCP key restricted to package & SHA‑1; only Distance Matrix + Places enabled.
+* Billing project linked; monthly quota alert at 80% usage.
+
+## 26) Permissions UX Flows
+
+* **Exact Alarms**: On Android 13+, show rationale screen → settings deep link; continue with inexact alarms if denied and mark task with a warning badge.
+* **Notifications**: Request at first task creation; gracefully proceed without scheduling if denied and surface a persistent in‑app banner.
+* **Location**: Request only on Arrive‑By creation when origin = current location; fallback to manual origin picker.
+
+## 27) Release Checklist (v0.1)
+
+* [ ] App name & icon set to “Be‑Kind‑Remind”.
+* [ ] VersionCode/VersionName set (e.g., 1/0.1.0).
+* [ ] ProGuard/R8 rules verified; Retrofit/OkHttp models kept as needed.
+* [ ] Crash reporting disabled or privacy‑safe configuration.
+* [ ] Manual QA checklist fully executed and signed off.
+* [ ] Upload internal testing build (Play Console or side‑load) and sanity pass on a second device.
+
+## 28) Defaults & Constants (Single Source of Truth)
+
+| Key                | Default                           | Notes                                                      |
+| ------------------ | --------------------------------- | ---------------------------------------------------------- |
+| Reminder cadence   | `[60,30,15,5]` minutes            | Applies to both modes; append `0` internally for Leave Now |
+| Buffer minutes     | `10` (Arrive‑By), `0` (Leave‑At)  | User‑configurable in Settings                              |
+| Traffic model      | `best_guess`                      | Optional `optimistic` / `pessimistic` in Settings          |
+| ETA poll cadence   | `15m` when within 90m of leaveBy  | WorkManager periodic                                       |
+| Tight poll cadence | `2–3m` when within 20m of leaveBy | ForegroundService                                          |
+| Snooze             | `5m`                              | One‑shot exact alarm                                       |
+| Time storage       | `UTC`                             | `timeZoneId` persisted per task                            |
+| Min SDK            | 26                                | Target 34/35                                               |
+| Navigation intent  | `google.navigation:q=<lat>,<lng>` | Use placeId if present                                     |
+
+Expose these through a single Kotlin object:
+
+```kotlin
+object Defaults {
+  val REMINDER_OFFSETS = listOf(60,30,15,5)
+  const val ARRIVE_BY_BUFFER_MIN = 10
+  const val LEAVE_AT_BUFFER_MIN = 0
+  const val ETA_POLL_MINUTES = 15
+  const val TIGHT_POLL_MINUTES = 3
+  const val SNOOZE_MINUTES = 5
+}
+```
+
+## 29) Feature Flags (BuildConfig)
+
+Set via Gradle `buildConfigField` for `debug`/`release`:
+
+* `USE_COMPOSE: Boolean = false`
+* `ENABLE_TELEMETRY: Boolean = false`
+* `ETA_DEBUG_TOASTS: Boolean = false`
+
+Gradle snippet:
+
+```kotlin
+buildTypes {
+  debug { buildConfigField("boolean", "USE_COMPOSE", "false")
+          buildConfigField("boolean", "ENABLE_TELEMETRY", "false")
+          buildConfigField("boolean", "ETA_DEBUG_TOASTS", "true") }
+  release { buildConfigField("boolean", "USE_COMPOSE", "false")
+            buildConfigField("boolean", "ENABLE_TELEMETRY", "false")
+            buildConfigField("boolean", "ETA_DEBUG_TOASTS", "false") }
+}
+```
+
+## 30) UI Wireframes & View IDs (ASCII)
+
+```
+[ Task List ]                             [ Settings ]
+┌───────────────────────────────┐        ┌──────────────────────────┐
+│  + New Task  (id: fab_add)    │        │ Default buffer  [10]     │(id: input_default_buffer)
+├───────────────────────────────┤        │ Traffic model [best...]  │(id: spinner_traffic)
+│ ▸ Airport @ 3:30p (ARRIVE_BY) │(id: card_task_item)
+│   Leave by 2:18p  ETA 42m     │        │ Reminder cadence         │(id: input_cadence)
+│   Next: 30m reminder          │        │ Exact alarm help [Open]  │(id: btn_alarm_help)
+├───────────────────────────────┤        └──────────────────────────┘
+│ ▸ Dentist @ 4:00p (LEAVE_AT)  │
+└───────────────────────────────┘
+
+[ Task Editor ] (tabs: ARRIVE_BY / LEAVE_AT)
+┌──────────────────────────────────────────────┐
+│ Title                (id: input_title)       │
+│ Destination         (id: input_destination)  │ (Places autocomplete)
+│ Origin (optional)   (id: input_origin)       │
+│ Time (local)        (id: input_time)         │ (Time picker)
+│ Buffer (min)        (id: input_buffer)       │
+│ Reminders           (id: input_offsets)      │ CSV
+│ Save                (id: btn_save_task)      │
+└──────────────────────────────────────────────┘
+```
+
+## 31) Localization & Time Formatting
+
+* Respect system 12/24h time format via `DateFormat.is24HourFormat(context)`.
+* All user‑visible copy in `strings.xml`; avoid hard‑coded units (use `%d min`).
+* English only for MVP; extract string resources for future i18n.
+
+## 32) Error & Status Copy (strings)
+
+```xml
+<string name="err_eta_refresh_failed">Couldn\'t refresh traffic. Using last ETA.</string>
+<string name="note_leave_time_updated">Leave time updated: %1$s</string>
+<string name="warn_exact_alarm_denied">Exact alarms are off. Reminders may be delayed.</string>
+<string name="warn_location_denied">Location is off. Pick an origin to compute ETA.</string>
+<string name="notif_leave_in">Leave in %1$d min for %2$s</string>
+<string name="notif_leave_now">Leave now for %1$s</string>
+<string name="action_start_nav">Start navigation</string>
+<string name="action_snooze">Snooze 5 min</string>
+<string name="action_dismiss">Dismiss</string>
+```
+
+## 33) CI Workflow (GitHub Actions)
+
+Create `.github/workflows/android.yml`:
+
+```yaml
+name: Android CI
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Gradle cache
+        uses: gradle/gradle-build-action@v3
+      - name: Inject MAPS_API_KEY (empty for CI)
+        run: |
+          echo "MAPS_API_KEY=dummy-ci-key" >> local.properties
+      - name: Lint & assemble
+        run: ./gradlew lintVitalRelease assembleDebug --stacktrace
+      - name: Unit tests
+        run: ./gradlew test --stacktrace
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/gradle-build-action@v3
+      - name: Detekt
+        run: ./gradlew detekt
+      - name: Ktlint
+        run: ./gradlew ktlintCheck
+```
+
+## 34) Test Fixtures (Place under `app/src/test/resources/fixtures/`)
+
+* `dm_success_with_traffic.json` — includes `duration_in_traffic`.
+* `dm_zero_results.json` — `status: ZERO_RESULTS`.
+* `dm_over_query_limit.json` — simulate quota error.
+
+Example (trimmed) `dm_success_with_traffic.json`:
+
+```json
+{
+  "rows": [
+    { "elements": [ { "status": "OK",
+        "duration": { "value": 2400 },
+        "duration_in_traffic": { "value": 2520 }
+    } ] }
+  ]
+}
+```
+
+## 35) Suggested Repo File Tree (generated by Codex)
+
+```
+app/
+  src/main/java/com/bekindremind/
+    data/db/
+      TripTask.kt
+      ScheduledAlarm.kt
+      AppDatabase.kt
+      TaskDao.kt
+    data/net/
+      DistanceMatrixService.kt
+      DistanceMatrixClient.kt
+    domain/
+      SchedulingEngine.kt
+    bg/
+      EtaRefreshWorker.kt
+      DepartureTickerService.kt
+      BootRestoreReceiver.kt
+    ui/
+      list/TaskListFragment.kt
+      edit/TaskEditorFragment.kt
+      detail/TaskDetailFragment.kt
+      settings/SettingsFragment.kt
+    util/NotificationHelper.kt
+    App.kt
+  src/main/res/values/strings.xml
+  src/test/resources/fixtures/*.json
+.github/workflows/android.yml
+README.md
+PRD.md
+```
+
 ---
 
 **This PRD is intended to be placed at the repo root as `PRD.md`.** It enumerates the MVP scope, concrete components, and an ordered plan so your code generation workflow can scaffold and implement the app incrementally.

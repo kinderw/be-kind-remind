@@ -11,24 +11,26 @@ Last updated: 2026-04-20 (UTC)
 
 ## Plan Status
 1. ✅ Finalize MVP implementation decisions
-2. 🔄 Foundation slice
-3. ⏳ Core scheduling logic and rescheduling rules
-4. ⏳ Minimal UI wiring
-5. ⏳ Google API integration
+2. ✅ Foundation slice
+3. 🔄 Core scheduling logic and rescheduling rules
+4. 🔄 Minimal UI wiring
+5. 🔄 Google API integration
 6. ⏳ Settings + action polish + reliability hardening
 7. ⏳ Validation against PRD criteria
 
 ## Completed in this pass
 - Added Android/Gradle project scaffold targeting SDK 35.
-- Added Compose entry activity.
+- Added Compose entry activity and exact-alarm permission blocker UX.
 - Added Room entities, DAOs, database, repository.
-- Added scheduling engine skeleton with exact alarm scheduling/cancel path.
-- Added notification helper with high-importance channel.
-- Added alarm and boot receivers and manifest wiring.
-- Added exact-alarm permission blocker UX in Compose.
-- Enforced exact-alarm permission in SchedulingEngine before scheduling.
+- Added scheduling engine skeleton with exact alarm scheduling/cancel path and permission enforcement.
+- Added notification helper, alarm receiver, and boot restore receiver with actual restore logic.
+- Added real Distance Matrix API client + `GoogleEtaProvider` integration.
+- Added periodic `EtaRefreshWorker` registration and worker implementation.
+- Added `DepartureTickerService` foreground service skeleton.
+- Added demo task scheduling buttons in UI to validate end-to-end flows quickly.
 
 ## Next up
-- Implement ETA refresh worker + foreground ticker service.
-- Integrate real Google Distance Matrix + Places clients.
-- Wire task creation/editing UI to repository and scheduling engine.
+- Replace demo buttons with task editor/list/detail screens.
+- Implement full notification actions (snooze/start navigation/dismiss).
+- Add automated unit tests for scheduling calculations and ETA shift rescheduling.
+- Address any branch merge conflicts by rebasing onto target and resolving line-by-line.

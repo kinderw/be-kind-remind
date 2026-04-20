@@ -12,6 +12,12 @@ interface TaskDao {
     @Query("SELECT * FROM trip_task ORDER BY timeUtc ASC")
     fun observeAll(): Flow<List<TripTaskEntity>>
 
+    @Query("SELECT * FROM trip_task ORDER BY timeUtc ASC")
+    suspend fun getAll(): List<TripTaskEntity>
+
+    @Query("SELECT * FROM trip_task WHERE status = :status ORDER BY timeUtc ASC")
+    suspend fun getByStatus(status: TaskStatus): List<TripTaskEntity>
+
     @Query("SELECT * FROM trip_task WHERE id = :id")
     suspend fun getById(id: Long): TripTaskEntity?
 

@@ -8,6 +8,10 @@ class TaskRepository(
 ) {
     fun observeTasks(): Flow<List<TripTaskEntity>> = taskDao.observeAll()
 
+    suspend fun getAllTasks(): List<TripTaskEntity> = taskDao.getAll()
+
+    suspend fun getScheduledTasks(): List<TripTaskEntity> = taskDao.getByStatus(TaskStatus.SCHEDULED)
+
     suspend fun saveTask(task: TripTaskEntity): Long = taskDao.upsert(task)
 
     suspend fun getTask(taskId: Long): TripTaskEntity? = taskDao.getById(taskId)
